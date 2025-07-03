@@ -1,0 +1,140 @@
+name: EasyClick Original Build Logic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code with LFS
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Git LFS pull
+      run: git lfs pull
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: 'latest-stable'
+
+    - name: Verify Source Files
+      run: |
+        echo "🔍 验证源文件完整性..."
+        echo "iosauto.framework/iosauto 文件大小:"
+        ls -la iosauto.framework/iosauto
+        echo ""
+        echo "WebDriverAgentLib.framework/WebDriverAgentLib 文件大小:"
+        ls -la WebDriverAgentLib.framework/WebDriverAgentLib
+        echo ""
+        echo "项目文件:"
+        ls -la tj-easyclick-agent.xcodeproj/project.pbxproj
+
+    - name: Build with Original Logic (Exact Copy)
+      run: |
+        echo "🔨 使用原始buildipa.sh完全相同的逻辑..."
+        
+        # 完全按照原始脚本的逻辑
+        p=$(pwd)
+        
+        # 清理derivedDataPath
+        rm -rf /tmp/derivedDataPath/*
+        
+        echo "🛠️ 开始xcodebuild..."
+        xcodebuild build-for-testing \
+          -project tj-easyclick-agent.xcodeproj \
+          -scheme WebDriverAgentRunner \
+          -sdk iphoneos \
+          -configuration Release \
+          -derivedDataPath /tmp/derivedDataPath \
+          -allowProvisioningUpdates
+        
+        echo "📂 进入构建目录..."
+        cd /tmp/derivedDataPath
+        cd Build/Products/Release-iphoneos
+        
+        echo "🔍 检查构建输出:"
+        ls -la
+        
+        echo "🗑️ 移除IntegrationApp.app..."
+        rm -r IntegrationApp.app || true
+        
+        echo "📦 创建Payload并移动app文件（原始逻辑）..."
+        mkdir Payload && mv *.app Payload
+        
+        echo "🔍 验证Payload内容:"
+        ls -la Payload/
+        
+        echo "📦 打包IPA..."
+        zip -r tj-easyclick-agent.ipa Payload
+        
+        echo "✅ IPA文件信息:"
+        ls -la tj-easyclick-agent.ipa
+        
+        echo "🔍 验证IPA内容结构:"
+        unzip -l tj-easyclick-agent.ipa | head -20
+        
+        # 复制到原始位置（模拟原始脚本）
+        cp tj-easyclick-agent.ipa $p/
+
+    - name: Create Additional Versions
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🏪 创建TrollStore版本..."
+        # 解压原始IPA
+        mkdir trollstore-work
+        cd trollstore-work
+        unzip -q ../tj-easyclick-agent.ipa
+        
+        # 找到app目录
+        APP_DIR=$(find Payload -name "*.app" -type d | head -1)
+        
+        if [ -n "$APP_DIR" ]; then
+          echo "🗑️ 移除签名文件..."
+          rm -rf "$APP_DIR/_CodeSignature" || true
+          rm -f "$APP_DIR/embedded.mobileprovision" || true
+          find "$APP_DIR" -name "*.mobileprovision" -delete || true
+          
+          echo "📦 重新打包TrollStore版本..."
+          zip -r ../tj-easyclick-agent-trollstore.ipa Payload
+        fi
+        
+        cd ..
+        echo "✅ TrollStore版本完成:"
+        ls -la tj-easyclick-agent-trollstore.ipa
+
+    - name: Upload Original IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Agent-Original
+        path: tj-easyclick-agent.ipa
+        retention-days: 30
+
+    - name: Upload TrollStore IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Agent-TrollStore-Fixed
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/tj-easyclick-agent-trollstore.ipa
+        retention-days: 30
+      continue-on-error: true
+
+    - name: Final Status
+      run: |
+        echo "🎉 构建完成！"
+        echo ""
+        echo "📱 生成的文件:"
+        echo "1. tj-easyclick-agent.ipa (原始逻辑)"
+        echo "2. tj-easyclick-agent-trollstore.ipa (TrollStore优化)"
+        echo ""
+        echo "💡 安装建议:"
+        echo "• 原始版本 → Sideloadly/AltStore"
+        echo "• TrollStore版本 → TrollStore"
+        echo ""
+        ls -la tj-easyclick-agent.ipa
+        if [ -f "/tmp/derivedDataPath/Build/Products/Release-iphoneos/tj-easyclick-agent-trollstore.ipa" ]; then
+          ls -la /tmp/derivedDataPath/Build/Products/Release-iphoneos/tj-easyclick-agent-trollstore.ipa
+        fi 

@@ -1,0 +1,311 @@
+name: EasyClick Diagnostic & Fix Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code with LFS
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Git LFS pull
+      run: git lfs pull
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: 'latest-stable'
+
+    - name: Deep Source Verification
+      run: |
+        echo "🔍 深度验证源文件..."
+        
+        echo "=== 项目结构检查 ==="
+        find . -name "*.framework" -type d
+        find . -name "*.xcodeproj" -type d
+        find . -name "*.app" -type d || echo "构建前无.app文件（正常）"
+        
+        echo "=== 关键文件大小检查 ==="
+        ls -la iosauto.framework/iosauto
+        ls -la WebDriverAgentLib.framework/WebDriverAgentLib
+        ls -la tj-easyclick-agent.xcodeproj/project.pbxproj
+        
+        echo "=== Info.plist检查 ==="
+        if [ -f "iosauto.framework/Info.plist" ]; then
+          echo "iosauto.framework Info.plist 内容:"
+          cat iosauto.framework/Info.plist
+        fi
+        
+        echo "=== 验证关键二进制文件 ==="
+        file iosauto.framework/iosauto
+        file WebDriverAgentLib.framework/WebDriverAgentLib
+
+    - name: Build with Maximum Diagnostics
+      run: |
+        echo "🔨 开始诊断性构建..."
+        
+        # 设置详细的构建环境
+        export XCODE_XCCONFIG_FILE=""
+        export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+        
+        p=$(pwd)
+        rm -rf /tmp/derivedDataPath/*
+        
+        echo "🛠️ Xcodebuild with full logging..."
+        xcodebuild build-for-testing \
+          -project tj-easyclick-agent.xcodeproj \
+          -scheme WebDriverAgentRunner \
+          -sdk iphoneos \
+          -configuration Release \
+          -derivedDataPath /tmp/derivedDataPath \
+          -allowProvisioningUpdates \
+          -verbose \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO \
+          | tee build.log
+        
+        echo "📂 构建输出完整检查..."
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "=== 所有文件列表 ==="
+        ls -la
+        
+        echo "=== 查找所有.app文件 ==="
+        find . -name "*.app" -type d -exec ls -la {} \;
+        
+        # 记录构建前的状态
+        echo "=== 构建目录详细信息 ==="
+        for item in *; do
+          if [ -d "$item" ]; then
+            echo "目录: $item"
+            ls -la "$item" | head -10
+            echo "---"
+          else
+            echo "文件: $item ($(du -h "$item" | cut -f1))"
+          fi
+        done
+
+    - name: Manual IPA Creation with Full Validation
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🔧 手动创建IPA文件..."
+        
+        # 1. 清理不需要的文件
+        echo "Step 1: 清理不需要的文件"
+        rm -rf IntegrationApp.app || true
+        ls -la
+        
+        # 2. 验证目标app文件
+        echo "Step 2: 验证目标app文件"
+        TARGET_APP=""
+        for app in *.app; do
+          if [ -d "$app" ] && [[ "$app" != "IntegrationApp.app" ]]; then
+            TARGET_APP="$app"
+            break
+          fi
+        done
+        
+        if [ -z "$TARGET_APP" ]; then
+          echo "❌ 错误: 未找到有效的.app文件"
+          echo "可用文件:"
+          ls -la
+          exit 1
+        fi
+        
+        echo "✅ 找到目标app: $TARGET_APP"
+        
+        # 3. 深度检查app内容
+        echo "Step 3: 深度检查app内容"
+        echo "App目录内容:"
+        ls -la "$TARGET_APP"
+        
+        echo "App可执行文件:"
+        find "$TARGET_APP" -type f -perm +111 | head -5
+        
+        echo "App Info.plist:"
+        if [ -f "$TARGET_APP/Info.plist" ]; then
+          plutil -p "$TARGET_APP/Info.plist" | head -20
+        else
+          echo "❌ 缺少Info.plist文件!"
+        fi
+        
+        # 4. 创建标准Payload结构
+        echo "Step 4: 创建标准Payload结构"
+        rm -rf Payload
+        mkdir -p Payload
+        
+        # 复制而不是移动，避免权限问题
+        cp -R "$TARGET_APP" Payload/
+        
+        echo "验证Payload结构:"
+        ls -la Payload/
+        
+        # 5. 验证app在Payload中的完整性
+        echo "Step 5: 验证Payload中的app"
+        PAYLOAD_APP="Payload/$TARGET_APP"
+        if [ -d "$PAYLOAD_APP" ]; then
+          echo "✅ App已正确放入Payload"
+          ls -la "$PAYLOAD_APP"
+          
+          if [ -f "$PAYLOAD_APP/Info.plist" ]; then
+            echo "✅ Info.plist存在"
+          else
+            echo "❌ Info.plist缺失"
+          fi
+          
+          # 检查可执行文件
+          APP_EXECUTABLE=$(find "$PAYLOAD_APP" -type f -perm +111 | grep -v Framework | head -1)
+          if [ -n "$APP_EXECUTABLE" ]; then
+            echo "✅ 可执行文件: $APP_EXECUTABLE"
+            ls -la "$APP_EXECUTABLE"
+          else
+            echo "❌ 未找到可执行文件"
+          fi
+        else
+          echo "❌ App未正确复制到Payload"
+          exit 1
+        fi
+        
+        # 6. 创建IPA
+        echo "Step 6: 创建IPA文件"
+        zip -r tj-easyclick-agent-diagnostic.ipa Payload
+        
+        echo "✅ IPA创建完成:"
+        ls -la tj-easyclick-agent-diagnostic.ipa
+        
+        # 7. 验证IPA内容
+        echo "Step 7: 验证IPA内部结构"
+        echo "IPA内容列表:"
+        unzip -l tj-easyclick-agent-diagnostic.ipa
+        
+        echo "验证关键路径:"
+        unzip -l tj-easyclick-agent-diagnostic.ipa | grep -E "(Payload/.*\.app/|Info\.plist|executable)"
+        
+        # 8. 创建测试解压
+        echo "Step 8: 测试解压验证"
+        mkdir -p test-extract
+        cd test-extract
+        unzip -q ../tj-easyclick-agent-diagnostic.ipa
+        
+        if [ -d "Payload" ]; then
+          echo "✅ Payload目录存在"
+          EXTRACTED_APP=$(find Payload -name "*.app" -type d | head -1)
+          if [ -n "$EXTRACTED_APP" ]; then
+            echo "✅ 提取的app: $EXTRACTED_APP"
+            ls -la "$EXTRACTED_APP"
+          else
+            echo "❌ 提取后未找到.app文件"
+          fi
+        else
+          echo "❌ 提取后无Payload目录"
+        fi
+        
+        cd ..
+        
+        # 复制到根目录
+        cp tj-easyclick-agent-diagnostic.ipa /tmp/final-ipa.ipa
+
+    - name: Create TrollStore Version (Minimal Changes)
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🏪 创建TrollStore版本（最小修改）..."
+        
+        if [ -f "tj-easyclick-agent-diagnostic.ipa" ]; then
+          mkdir -p trollstore-work
+          cd trollstore-work
+          
+          # 解压原始IPA
+          unzip -q ../tj-easyclick-agent-diagnostic.ipa
+          
+          if [ -d "Payload" ]; then
+            APP_DIR=$(find Payload -name "*.app" -type d | head -1)
+            
+            if [ -n "$APP_DIR" ]; then
+              echo "处理TrollStore版本: $APP_DIR"
+              
+              # 只移除签名文件，不添加任何新文件
+              rm -rf "$APP_DIR/_CodeSignature" 2>/dev/null || true
+              rm -f "$APP_DIR/embedded.mobileprovision" 2>/dev/null || true
+              
+              echo "TrollStore版本文件清理完成"
+              ls -la "$APP_DIR"
+              
+              # 重新打包
+              zip -r ../tj-easyclick-agent-trollstore.ipa Payload
+              
+              echo "✅ TrollStore版本创建完成"
+            else
+              echo "❌ TrollStore版本: 未找到app文件"
+            fi
+          else
+            echo "❌ TrollStore版本: 无Payload目录"
+          fi
+          
+          cd ..
+        else
+          echo "❌ 原始IPA不存在，跳过TrollStore版本"
+        fi
+
+    - name: Final Comprehensive Report
+      run: |
+        echo "📊 最终诊断报告"
+        echo "===================="
+        
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "生成的文件:"
+        ls -la *.ipa 2>/dev/null || echo "无IPA文件生成"
+        
+        for ipa in *.ipa; do
+          if [ -f "$ipa" ]; then
+            echo ""
+            echo "=== $ipa 详细信息 ==="
+            echo "文件大小: $(du -h "$ipa" | cut -f1)"
+            echo "文件类型: $(file "$ipa")"
+            echo ""
+            echo "内容结构:"
+            unzip -l "$ipa" | head -30
+            echo ""
+            echo "关键路径验证:"
+            unzip -l "$ipa" | grep -E "(Payload/.*\.app/|Info\.plist)" | head -10
+            echo "-------------------"
+          fi
+        done
+        
+        echo ""
+        echo "💡 诊断建议:"
+        echo "1. 检查上述IPA结构是否包含 Payload/XXX.app/ 路径"
+        echo "2. 确认.app目录内有Info.plist文件"
+        echo "3. 验证可执行文件是否存在"
+        echo "4. 如果结构正确但仍失败，问题可能在于Info.plist内容"
+
+    - name: Upload Diagnostic IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Diagnostic-IPA
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/tj-easyclick-agent-diagnostic.ipa
+        retention-days: 30
+
+    - name: Upload TrollStore IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-TrollStore-Diagnostic
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/tj-easyclick-agent-trollstore.ipa
+        retention-days: 30
+      continue-on-error: true
+
+    - name: Upload Build Log
+      uses: actions/upload-artifact@v4
+      with:
+        name: Build-Diagnostic-Log
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/build.log
+        retention-days: 7
+      continue-on-error: true 

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <link href="htmljs/bootstrap.min.css" rel="stylesheet">
+    <script src="htmljs/jquery.min.js"></script>
+    <script src="htmljs/bootstrap.min.js"></script>
+    <style>
+        body { padding-top: 10px; }
+        .container { padding: 15px; }
+        .form-group label { font-weight: bold; }
+        .btn-group { width: 100%; display: flex; }
+        .btn-group .btn { flex-grow: 1; margin: 0 5px; }
+        .form-check-label { margin-right: 15px; }
+    </style>
+</head>
+
+<body>
+<div class="container">
+    <div class="alert alert-info" role="alert">
+        <strong>🚛 订单筛选配置</strong>
+    </div>
+
+    <div class="form-group mb-3">
+        <label for="minPrice" class="form-label">最低金额 (元)</label>
+        <input type="number" class="form-control" id="minPrice" placeholder="0表示不限制">
+    </div>
+
+    <div class="form-group mb-3">
+        <label for="maxDistance" class="form-label">最远距离 (公里)</label>
+        <input type="number" class="form-control" id="maxDistance" placeholder="0表示不限制">
+    </div>
+    
+    <div class="form-group mb-3">
+        <label class="form-label">接受车型</label>
+        <div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="vehicle_any" value="不限">
+                <label class="form-check-label" for="vehicle_any">不限</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="vehicle_xiangshi" value="厢式">
+                <label class="form-check-label" for="vehicle_xiangshi">厢式</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="vehicle_pingban" value="平板">
+                <label class="form-check-label" for="vehicle_pingban">平板</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="vehicle_gaolan" value="高栏">
+                <label class="form-check-label" for="vehicle_gaolan">高栏</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group mb-3">
+        <label for="keywordBlacklist" class="form-label">关键词屏蔽 (逗号隔开)</label>
+        <textarea class="form-control" id="keywordBlacklist" rows="3" placeholder="例如：人工,带尾板,小件"></textarea>
+    </div>
+
+    <hr>
+    
+    <div class="btn-group mt-3">
+        <button type="button" class="btn btn-primary" onclick="saveParam()">💾 保存配置</button>
+        <button type="button" class="btn btn-success" onclick="start()">🚀 执行脚本</button>
+    </div>
+    <div class="btn-group mt-2">
+        <button type="button" class="btn btn-warning" onclick="pause()">⏸️ 暂停</button>
+        <button type="button" class="btn btn-info" onclick="continueRun()">▶️ 继续</button>
+    </div>
+</div>
+
+<script>
+    function pause() {
+        // timeout: 0 表示永久暂停，直到手动恢复
+        window.ec.setScriptPause({"pause": true, "timeout": 0});
+    }
+
+    function continueRun() {
+        window.ec.setScriptPause({"pause": false, "timeout": 0});
+    }
+    
+    function start() {
+        // 先保存一次，确保运行的是最新配置
+        saveParam(true); 
+    }
+
+    function resetParam() {
+        // 从后台脚本的文件中读取配置
+        window.ec.call("readConfigFromFile", null, function(resp) {
+            if (!resp) return;
+
+            let p = JSON.parse(resp);
+            $("#minPrice").val(p.minPrice || '');
+            $("#maxDistance").val(p.maxDistance || '');
+            $("#keywordBlacklist").val(p.keywordBlacklist ? p.keywordBlacklist.join(',') : '');
+            
+            $('input[type="checkbox"]').prop('checked', false);
+            if (p.vehicleTypes && p.vehicleTypes.length > 0) {
+                p.vehicleTypes.forEach(function(vehicle) {
+                    $(`input[type="checkbox"][value="${vehicle}"]`).prop('checked', true);
+                });
+            } else {
+                 $('#vehicle_any').prop('checked', true);
+            }
+        });
+    }
+
+    function saveParam(isStarting) {
+        let vehicleTypes = [];
+        $('input[type="checkbox"]:checked').each(function() {
+            vehicleTypes.push($(this).val());
+        });
+
+        if (vehicleTypes.includes('不限') || vehicleTypes.length === 0) {
+            vehicleTypes = ['不限'];
+        }
+
+        let keywordBlacklist = $("#keywordBlacklist").val().split(/,|，/).map(k => k.trim()).filter(Boolean);
+
+        let config = {
+            minPrice: parseFloat($("#minPrice").val()) || 0,
+            maxDistance: parseFloat($("#maxDistance").val()) || 0,
+            vehicleTypes: vehicleTypes,
+            keywordBlacklist: keywordBlacklist
+        };
+        
+        let configJson = JSON.stringify(config);
+        console.log("调用后台保存配置: " + configJson);
+
+        // 调用后台脚本注册的函数来保存配置
+        window.ec.call("saveConfigToFile", configJson, function (resp) {
+            if (resp === "true") {
+                if (isStarting === true) {
+                     window.ec.start();
+                } else {
+                     alert("保存成功!");
+                }
+            } else {
+                alert("保存失败! 后台脚本可能未运行或发生错误。");
+            }
+        });
+    }
+
+    $(document).ready(function () {
+        resetParam();
+
+        // "不限"与其他选项的互斥逻辑
+        $('#vehicle_any').on('change', function() {
+            if ($(this).is(':checked')) {
+                // 如果"不限"被选中，取消其他所有车型的选中
+                $('#vehicle_xiangshi, #vehicle_pingban, #vehicle_gaolan').prop('checked', false);
+            }
+        });
+
+        $('#vehicle_xiangshi, #vehicle_pingban, #vehicle_gaolan').on('change', function() {
+            if ($(this).is(':checked')) {
+                // 如果其他任一车型被选中，取消"不限"的选中
+                $('#vehicle_any').prop('checked', false);
+            }
+        });
+    });
+</script>
+</body>
+</html>

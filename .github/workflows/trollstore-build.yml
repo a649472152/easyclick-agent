@@ -1,0 +1,245 @@
+name: EasyClick Build for TrollStore (Fixed Structure)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code with LFS
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Git LFS pull
+      run: git lfs pull
+
+    - name: Verify LFS files
+      run: |
+        echo "检查framework文件..."
+        ls -la *.framework/ || echo "Framework目录检查完毕"
+        echo "检查LFS跟踪的文件..."
+        git lfs ls-files
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: 'latest-stable'
+
+    - name: Build EasyClick Agent
+      run: |
+        echo "开始编译..."
+        xcodebuild build-for-testing \
+          -project tj-easyclick-agent.xcodeproj \
+          -scheme WebDriverAgentRunner \
+          -sdk iphoneos \
+          -configuration Release \
+          -derivedDataPath /tmp/derivedDataPath \
+          -allowProvisioningUpdates \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+
+    - name: Verify Build Output
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        echo "🔍 检查编译输出目录内容:"
+        ls -la
+        echo ""
+        echo "🔍 查找所有.app文件:"
+        find . -name "*.app" -type d
+        echo ""
+        echo "🔍 检查每个.app文件的内容:"
+        for app in *.app; do
+          if [ -d "$app" ]; then
+            echo "📱 $app 文件夹内容:"
+            ls -la "$app"
+            echo "---"
+          fi
+        done
+
+    - name: Create Standard IPA (Fixed Structure)
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🧹 清理不需要的app..."
+        rm -rf IntegrationApp.app || true
+        
+        echo "📂 创建Payload目录..."
+        rm -rf Payload
+        mkdir -p Payload
+        
+        echo "🔍 查找目标app文件..."
+        TARGET_APP=$(find . -maxdepth 1 -name "*.app" -type d | grep -v IntegrationApp | head -1)
+        
+        if [ -n "$TARGET_APP" ] && [ -d "$TARGET_APP" ]; then
+          echo "✅ 找到目标app: $TARGET_APP"
+          echo "📱 复制app到Payload目录..."
+          cp -r "$TARGET_APP" Payload/
+          
+          echo "🔍 验证Payload目录结构:"
+          ls -la Payload/
+          echo ""
+          echo "🔍 验证app内容:"
+          ls -la "Payload/$(basename "$TARGET_APP")"
+          
+          echo "📦 打包标准版IPA..."
+          zip -r EasyClick-Agent-Standard.ipa Payload
+          
+          echo "✅ 标准版IPA文件信息:"
+          ls -la EasyClick-Agent-Standard.ipa
+          
+          echo "🔍 验证IPA内容结构:"
+          unzip -l EasyClick-Agent-Standard.ipa | head -20
+        else
+          echo "❌ 未找到有效的.app文件"
+          exit 1
+        fi
+
+    - name: Create TrollStore Version (Fixed Structure)
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🏪 创建TrollStore版本..."
+        rm -rf Payload-TrollStore
+        cp -r Payload Payload-TrollStore
+        
+        APP_DIR=$(find Payload-TrollStore -name "*.app" -type d | head -1)
+        
+        if [ -n "$APP_DIR" ] && [ -d "$APP_DIR" ]; then
+          echo "✅ 处理TrollStore版本: $APP_DIR"
+          
+          echo "🗑️ 移除签名文件..."
+          rm -rf "$APP_DIR/_CodeSignature" || true
+          rm -f "$APP_DIR/embedded.mobileprovision" || true
+          find "$APP_DIR" -name "*.mobileprovision" -delete 2>/dev/null || true
+          
+          echo "📄 创建TrollStore entitlements文件..."
+          cat > "$APP_DIR/entitlements.plist" << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>get-task-allow</key>
+          <true/>
+          <key>com.apple.private.dtrace.allow</key>
+          <true/>
+          <key>com.apple.private.security.no-container</key>
+          <true/>
+        </dict>
+        </plist>
+        EOF
+          
+          echo "🔍 验证TrollStore版本结构:"
+          ls -la Payload-TrollStore/
+          
+          echo "📦 打包TrollStore版本..."
+          zip -r EasyClick-Agent-TrollStore.ipa Payload-TrollStore
+          
+          echo "✅ TrollStore版本文件信息:"
+          ls -la EasyClick-Agent-TrollStore.ipa
+        else
+          echo "❌ TrollStore版本: 未找到app文件"
+        fi
+
+    - name: Create Unsigned Version (Fixed Structure)
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🔓 创建无签名版本..."
+        rm -rf Payload-Unsigned
+        cp -r Payload Payload-Unsigned
+        
+        APP_DIR=$(find Payload-Unsigned -name "*.app" -type d | head -1)
+        
+        if [ -n "$APP_DIR" ] && [ -d "$APP_DIR" ]; then
+          echo "✅ 处理无签名版本: $APP_DIR"
+          
+          echo "🗑️ 彻底移除所有签名文件..."
+          # 移除主app签名
+          rm -rf "$APP_DIR/_CodeSignature" 2>/dev/null || true
+          rm -f "$APP_DIR/embedded.mobileprovision" 2>/dev/null || true
+          
+          # 移除Frameworks中的签名
+          if [ -d "$APP_DIR/Frameworks" ]; then
+            echo "🗑️ 清理Frameworks签名..."
+            find "$APP_DIR/Frameworks" -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
+          fi
+          
+          # 移除PlugIns中的签名
+          if [ -d "$APP_DIR/PlugIns" ]; then
+            echo "🗑️ 清理PlugIns签名..."
+            find "$APP_DIR/PlugIns" -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
+          fi
+          
+          # 移除所有mobileprovision文件
+          find "$APP_DIR" -name "*.mobileprovision" -delete 2>/dev/null || true
+          
+          echo "🔍 验证无签名版本结构:"
+          ls -la Payload-Unsigned/
+          
+          echo "📦 打包无签名版本..."
+          zip -r EasyClick-Agent-Unsigned.ipa Payload-Unsigned
+          
+          echo "✅ 无签名版本文件信息:"
+          ls -la EasyClick-Agent-Unsigned.ipa
+        else
+          echo "❌ 无签名版本: 未找到app文件"
+        fi
+
+    - name: Final Verification
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        
+        echo "🔍 最终验证所有IPA文件:"
+        for ipa in *.ipa; do
+          if [ -f "$ipa" ]; then
+            echo ""
+            echo "📱 验证 $ipa:"
+            echo "文件大小: $(du -h "$ipa" | cut -f1)"
+            echo "IPA内容结构:"
+            unzip -l "$ipa" | grep -E "(Payload/|\.app/)" | head -10
+            echo "---"
+          fi
+        done
+
+    - name: Upload Standard IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Agent-Standard
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/EasyClick-Agent-Standard.ipa
+        retention-days: 30
+
+    - name: Upload TrollStore IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Agent-TrollStore
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/EasyClick-Agent-TrollStore.ipa
+        retention-days: 30
+      continue-on-error: true
+
+    - name: Upload Unsigned IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyClick-Agent-Unsigned
+        path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/EasyClick-Agent-Unsigned.ipa
+        retention-days: 30
+      continue-on-error: true
+
+    - name: Build Summary
+      run: |
+        cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        echo "🎉 构建完成！"
+        echo ""
+        echo "📱 生成的IPA文件:"
+        for ipa in *.ipa; do
+          if [ -f "$ipa" ]; then
+            echo "✅ $ipa - $(du -h "$ipa" | cut -f1)"
+          fi
+        done
+        echo ""
+        echo "💡 如果遇到Parse Error 301，请尝试使用不同版本的IPA文件" 

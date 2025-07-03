@@ -1,0 +1,15 @@
+{
+  "libs": [
+    "ios-jslibs/basic.js",
+    "ios-jslibs/device.js",
+    "ios-jslibs/ui.js",
+    "ios-jslibs/image.js",
+    "ios-jslibs/file.js",
+    "ios-jslibs/http.js",
+    "ios-jslibs/utils.js"
+  ],
+  "dependencies": {
+    "easyclick": ">=5.12.0"
+  },
+  "description": "EasyClick iOS自动化项目依赖库配置"
+}

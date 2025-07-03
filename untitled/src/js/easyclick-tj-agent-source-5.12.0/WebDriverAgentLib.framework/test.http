@@ -1,0 +1,68 @@
+POST http://127.0.0.1:19402/ecnb/apps/launch
+Content-Type: application/json
+
+{
+  "bundleId": "com.jiangjia.gif",
+  "ignoreState": "1"
+}
+
+###
+
+
+POST http://127.0.0.1:19402/ecnb/apps/terminate
+Content-Type: application/json
+
+{
+  "bundleId": "com.jiangjia.gif",
+  "ignoreState": "1"
+}
+
+###
+
+
+GET http://127.0.0.1:19402/ecnb/activeAppInfo
+###
+
+
+GET http://192.168.2.17:18924/devapi/requestEx
+Content-Type: application/json
+
+{
+  "method": "GET",
+  "url": "https://www.baidu.com"
+}
+
+###
+POST http://127.0.0.1:19402/ecnb/agentCall
+Content-Type: application/json
+
+{
+  "action": "requestEx",
+  "jsonString": "{\"method\":\"GET\",\"url\": \"http://127.0.0.1:18924?a=1\",\"timeout\":\"3000\",\"followRedirects\":\"1\"}"
+
+}
+
+###
+
+POST http://127.0.0.1:19402/ecnb/agentCall
+Content-Type: application/json
+
+{
+  "action": "forwardRequest",
+  "url": "http://127.0.0.1:18924/devapi/requestEx",
+  "jsonString": " {\"method\":\"GET\",\"url\": \"https://www.ieasyclick.com/\"}"
+
+}
+
+###
+POST http://127.0.0.1:19402/ecnb/agentCall
+Content-Type: application/json
+
+{
+  "action": "httpPostJson",
+  "url": "http://127.0.0.1:18924/",
+  "jsonString": " {\"method\":\"GET\",\"url\": \"https://www.ieasyclick.com/\"}"
+
+}
+
+###
