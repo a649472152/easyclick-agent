@@ -35,7 +35,7 @@ jobs:
       run: |
         cd ${{ env.WDA_PROJECT_PATH }}
         export ACTION=build
-        export SDK=iphoneos
+        export SDK=device
         # We use 'runner' for device build, not 'WebDriverAgentRunner'
         export TARGET=runner 
         export DERIVED_DATA_PATH="$(pwd)/build"
