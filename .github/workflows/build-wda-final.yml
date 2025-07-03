@@ -1,0 +1,110 @@
+name: Build WebDriverAgent for TrollStore
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ wda-trollstore ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Select Xcode 15.4
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.4'
+
+    - name: Navigate to Project Directory
+      id: set_path
+      run: |
+        WDA_PATH="untitled/src/js/WebDriverAgent-9.14.6/WebDriverAgent-9.14.6"
+        echo "WDA_PROJECT_PATH=$WDA_PATH" >> $GITHUB_ENV
+        cd $WDA_PATH
+        echo "Current directory: $(pwd)"
+
+    - name: Install Dependencies
+      run: |
+        cd ${{ env.WDA_PROJECT_PATH }}
+        npm install
+
+    - name: Build WebDriverAgent using official script
+      run: |
+        cd ${{ env.WDA_PROJECT_PATH }}
+        export ACTION=build
+        export SDK=iphoneos
+        # We use 'runner' for device build, not 'WebDriverAgentRunner'
+        export TARGET=runner 
+        export DERIVED_DATA_PATH="$(pwd)/build"
+        
+        echo "Starting build with following settings:"
+        echo "TARGET: $TARGET"
+        echo "SDK: $SDK"
+        echo "DERIVED_DATA_PATH: $DERIVED_DATA_PATH"
+        
+        bash Scripts/build.sh
+
+    - name: Create TrollStore IPA
+      run: |
+        cd ${{ env.WDA_PROJECT_PATH }}
+        
+        # Find the built .app bundle
+        echo "Searching for .app bundle in $(pwd)/build"
+        APP_PATH=$(find "$(pwd)/build" -name "WebDriverAgentRunner-Runner.app" -type d | head -n 1)
+        
+        if [ -z "$APP_PATH" ]; then
+          echo "::error::Build failed, WebDriverAgentRunner-Runner.app not found!"
+          exit 1
+        fi
+        echo "Found .app bundle at: $APP_PATH"
+
+        # Create the IPA structure
+        IPA_DIR="ipa_build"
+        PAYLOAD_DIR="$IPA_DIR/Payload"
+        mkdir -p "$PAYLOAD_DIR"
+        
+        # Move the .app bundle into the Payload directory. 'mv' is crucial.
+        mv "$APP_PATH" "$PAYLOAD_DIR/"
+        
+        # Clean for TrollStore
+        echo "Removing code signature for TrollStore compatibility..."
+        rm -rf "$PAYLOAD_DIR/WebDriverAgentRunner-Runner.app/_CodeSignature"
+        rm -f "$PAYLOAD_DIR/WebDriverAgentRunner-Runner.app/embedded.mobileprovision"
+
+        # Create the final IPA
+        IPA_NAME="WebDriverAgent-TrollStore-Final.ipa"
+        cd "$IPA_DIR"
+        zip -r "../$IPA_NAME" *
+        cd ..
+        
+        echo "Successfully created $IPA_NAME"
+        ls -lh *.ipa
+
+    - name: Upload IPA as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: WebDriverAgent-TrollStore-IPA
+        path: ${{ env.WDA_PROJECT_PATH }}/WebDriverAgent-TrollStore-Final.ipa
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: wda-trollstore-${{ github.run_number }}
+        name: WebDriverAgent TrollStore Build #${{ github.run_number }}
+        body: |
+          **This is the definitive TrollStore build for WebDriverAgent 9.14.6.**
+          
+          - ✅ Built from the correct `WebDriverAgent-9.14.6` source.
+          - ✅ Uses the official build script for maximum reliability.
+          - ✅ Correct IPA structure (`mv` instead of `cp`) to fix Parse Error 301.
+          - ✅ Unsigned for TrollStore to fix Install Error 185.
+          
+          Download the `WebDriverAgent-TrollStore-Final.ipa` file below and install with TrollStore.
+        files: ${{ env.WDA_PROJECT_PATH }}/WebDriverAgent-TrollStore-Final.ipa
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
