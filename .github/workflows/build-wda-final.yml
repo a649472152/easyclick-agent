@@ -36,6 +36,7 @@ jobs:
         cd ${{ env.WDA_PROJECT_PATH }}
         export ACTION=build
         export SDK=device
+        export DEST=generic
         # We use 'runner' for device build, not 'WebDriverAgentRunner'
         export TARGET=runner 
         export DERIVED_DATA_PATH="$(pwd)/build"
