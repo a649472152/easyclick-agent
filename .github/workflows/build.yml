@@ -1,4 +1,4 @@
-﻿name: EasyClick Build for TrollStore (Unsigned)
+﻿name: EasyClick Build for TrollStore (Fixed)
 
 on:
   push:
@@ -20,9 +20,9 @@ jobs:
       with:
         xcode-version: 'latest-stable'
 
-    - name: Build EasyClick Agent (Unsigned for TrollStore)
+    - name: Build EasyClick Agent
       run: |
-        echo "Building unsigned version for TrollStore..."
+        echo "Building EasyClick Agent..."
         xcodebuild build-for-testing \
           -project tj-easyclick-agent.xcodeproj \
           -scheme WebDriverAgentRunner \
@@ -35,36 +35,47 @@ jobs:
           PROVISIONING_PROFILE_SPECIFIER="" \
           DEVELOPMENT_TEAM=""
 
-    - name: Create TrollStore Compatible IPA (Fully Unsigned)
+    - name: Create Unsigned IPA for TrollStore  
       run: |
         cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
-        echo "Creating fully unsigned IPA for TrollStore..."
+        echo "Creating unsigned IPA for TrollStore..."
         
-        # Find the app bundle
-        APP_NAME=\
-        echo "Found app: \"
+        # List all files to debug
+        ls -la
         
-        # Remove all signing related files
-        find "\" -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
-        find "\" -name "*.mobileprovision" -delete 2>/dev/null || true
-        find "\" -name "embedded.mobileprovision" -delete 2>/dev/null || true
-        
-        # Create clean Payload directory
-        rm -rf Payload
+        # Create Payload directory
         mkdir -p Payload
-        cp -r "\" Payload/
+        
+        # Copy all .app bundles to Payload
+        for app in *.app; do
+          if [ -d "\" ]; then
+            echo "Processing app: \"
+            
+            # Remove signing files from app bundle
+            rm -rf "\/_CodeSignature" 2>/dev/null || true
+            rm -f "\/*.mobileprovision" 2>/dev/null || true  
+            rm -f "\/embedded.mobileprovision" 2>/dev/null || true
+            
+            # Copy to Payload
+            cp -r "\" Payload/
+            echo "Copied \ to Payload"
+          fi
+        done
+        
+        # Verify Payload contents
+        echo "Payload contents:"
+        ls -la Payload/
         
         # Create IPA
-        zip -r EasyClick-Agent-Unsigned.ipa Payload
+        zip -r EasyClick-Agent-TrollStore-Fixed.ipa Payload
         ls -la *.ipa
         
-        # Show app bundle info
-        echo "App bundle contents:"
-        ls -la "Payload/\/"
+        # Show final IPA size
+        du -h *.ipa
 
-    - name: Upload Unsigned IPA
+    - name: Upload TrollStore IPA
       uses: actions/upload-artifact@v4
       with:
-        name: EasyClick-Agent-Unsigned
+        name: EasyClick-Agent-TrollStore-Fixed
         path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/*.ipa
         retention-days: 30
