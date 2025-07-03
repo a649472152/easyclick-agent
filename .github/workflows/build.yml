@@ -1,4 +1,4 @@
-﻿name: EasyClick Build with Git LFS
+﻿name: EasyClick Build for TrollStore
 
 on:
   push:
@@ -20,9 +20,32 @@ jobs:
       with:
         xcode-version: 'latest-stable'
 
-    - name: Build EasyClick Agent
+    - name: Create Entitlements for TrollStore
       run: |
-        echo "Starting build..."
+        cat > WebDriverAgentRunner.entitlements << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>application-identifier</key>
+            <string>com.facebook.WebDriverAgentRunner</string>
+            <key>com.apple.developer.team-identifier</key>
+            <string>FB8BKM8A6F</string>
+            <key>get-task-allow</key>
+            <true/>
+            <key>com.apple.private.dtrace.allow</key>
+            <true/>
+            <key>com.apple.private.security.no-container</key>
+            <true/>
+            <key>com.apple.private.skip-library-validation</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+
+    - name: Build EasyClick Agent for TrollStore
+      run: |
+        echo "Building for TrollStore compatibility..."
         xcodebuild build-for-testing \
           -project tj-easyclick-agent.xcodeproj \
           -scheme WebDriverAgentRunner \
@@ -32,19 +55,25 @@ jobs:
           -allowProvisioningUpdates \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          PROVISIONING_PROFILE_SPECIFIER=""
 
-    - name: Package IPA
+    - name: Package TrollStore Compatible IPA
       run: |
         cd /tmp/derivedDataPath/Build/Products/Release-iphoneos
+        echo "Creating TrollStore compatible IPA..."
         mkdir -p Payload
-        mv *.app Payload/ || true
-        zip -r EasyClick-Agent.ipa Payload
+        cp -r *.app Payload/ || true
+        
+        # Copy entitlements to app bundle
+        cp /Users/runner/work/easyclick-agent/easyclick-agent/WebDriverAgentRunner.entitlements Payload/*.app/ || true
+        
+        zip -r EasyClick-Agent-TrollStore.ipa Payload
         ls -la *.ipa
 
-    - name: Upload IPA Artifact
+    - name: Upload TrollStore IPA
       uses: actions/upload-artifact@v4
       with:
-        name: EasyClick-Agent
+        name: EasyClick-Agent-TrollStore
         path: /tmp/derivedDataPath/Build/Products/Release-iphoneos/*.ipa
         retention-days: 30
