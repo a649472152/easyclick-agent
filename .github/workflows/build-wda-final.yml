@@ -37,6 +37,7 @@ jobs:
         export ACTION=build
         export SDK=device
         export DEST=generic
+        export CODE_SIGN=no
         # We use 'runner' for device build, not 'WebDriverAgentRunner'
         export TARGET=runner 
         export DERIVED_DATA_PATH="$(pwd)/build"
