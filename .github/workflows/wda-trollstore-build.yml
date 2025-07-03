@@ -3,7 +3,7 @@ name: WebDriverAgent TrollStore Build
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, wda-trollstore ]
 
 jobs:
   build:
@@ -141,7 +141,7 @@ jobs:
         path: build/WebDriverAgent/WebDriverAgent-TrollStore.ipa
         
     - name: Create Release
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/wda-trollstore'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: wda-v${{ github.run_number }}
